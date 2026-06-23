@@ -1,0 +1,8 @@
+*.so
+
+__pycache__/
+
+.venv/
+
+task7/hf_cache/
+README.test.txt

@@ -1,0 +1,11 @@
+# Llama 3 8B — Meta, 2024
+# https://huggingface.co/meta-llama/Meta-Llama-3-8B
+name: llama3_8b
+hidden_dim: 4096
+num_heads: 32
+num_kv_heads: 8        # GQA, 4:1 ratio
+num_layers: 32
+head_dim: 128          # hidden_dim / num_heads
+vocab_size: 128256
+max_seq_len: 8192
+dtype: bf16

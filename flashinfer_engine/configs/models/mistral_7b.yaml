@@ -1,0 +1,11 @@
+# Mistral 7B v0.1 — Mistral AI, 2023
+# https://huggingface.co/mistralai/Mistral-7B-v0.1
+name: mistral_7b
+hidden_dim: 4096
+num_heads: 32
+num_kv_heads: 8        # GQA, 4:1 ratio (same ratio as Llama-3-8B)
+num_layers: 32
+head_dim: 128          # hidden_dim / num_heads
+vocab_size: 32000
+max_seq_len: 32768     # sliding window attention; full context via rolling buffer
+dtype: bf16

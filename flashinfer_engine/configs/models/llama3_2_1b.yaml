@@ -1,0 +1,11 @@
+# Llama 3.2 1B — Meta, 2024
+# https://huggingface.co/meta-llama/Llama-3.2-1B
+name: llama3_2_1b
+hidden_dim: 2048
+num_heads: 32
+num_kv_heads: 8        # GQA, 4:1 ratio
+num_layers: 16
+head_dim: 64           # hidden_dim / num_heads
+vocab_size: 128256
+max_seq_len: 131072
+dtype: bf16

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flashinfer-engine"
+version = "0.1.0"
+description = "Production-grade LLM inference engine with custom FlashAttention kernels"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "pyyaml>=6.0",
+    "numpy>=1.24",
+    "click>=8.0",
+    "matplotlib>=3.7",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+flashinfer-bench = "flashinfer_engine.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+flashinfer_engine = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "gpu: requires CUDA GPU (auto-skipped if torch.cuda.is_available() is False)",
+]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--tb=short",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

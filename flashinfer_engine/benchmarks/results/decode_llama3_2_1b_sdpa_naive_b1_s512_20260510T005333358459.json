@@ -1,0 +1,23 @@
+{
+  "benchmark": "decode",
+  "model": "llama3_2_1b",
+  "backend": "sdpa_naive",
+  "dtype": "fp32",
+  "batch_size": 1,
+  "prompt_len": 512,
+  "output_len": 1,
+  "num_heads": 32,
+  "num_kv_heads": 8,
+  "head_dim": 64,
+  "mean_ms": 0.07682261057198048,
+  "p50_ms": 0.07642991840839386,
+  "p95_ms": 0.07936048787087202,
+  "p99_ms": 0.08107054512947798,
+  "min_ms": 0.07574900519102812,
+  "max_ms": 0.08149805944412947,
+  "tokens_per_sec": 13083.8815587454,
+  "vram_peak_gb": 0.0078277587890625,
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "git_commit": "78fe4c1",
+  "timestamp": "2026-05-10T00:53:33.358268+00:00"
+}

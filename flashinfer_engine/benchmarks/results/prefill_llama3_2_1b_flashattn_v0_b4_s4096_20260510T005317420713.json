@@ -1,0 +1,23 @@
+{
+  "benchmark": "prefill",
+  "model": "llama3_2_1b",
+  "backend": "flashattn_v0",
+  "dtype": "fp32",
+  "batch_size": 4,
+  "prompt_len": 4096,
+  "output_len": 0,
+  "num_heads": 32,
+  "num_kv_heads": 8,
+  "head_dim": 64,
+  "mean_ms": 44.24752298509702,
+  "p50_ms": 44.25227554747835,
+  "p95_ms": 44.4447664078325,
+  "p99_ms": 44.51831161044538,
+  "min_ms": 43.9803070621565,
+  "max_ms": 44.5366979110986,
+  "tokens_per_sec": 370240.8474434626,
+  "vram_peak_gb": 1.375,
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "git_commit": "78fe4c1",
+  "timestamp": "2026-05-10T00:53:17.420452+00:00"
+}

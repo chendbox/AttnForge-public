@@ -1,0 +1,8 @@
+project_name: llm_inference_engine
+validation:
+  run_v0_prefill: true
+  run_v0_decode: true
+  causal_only: true
+reporting:
+  output_dir: artifacts
+  save_logs: true
