@@ -173,18 +173,3 @@ compared generated text against the HuggingFace reference — same coherence
 level means attention is computing correct values.
 
 ---
-
-## What to Avoid Saying
-
-- ❌ "I built a faster version of FlashAttention." (You haven't, and the
-  interviewer will check.)
-- ❌ "vLLM-equivalent performance." (You're 4-5x off; don't oversell.)
-- ❌ "Production-ready." (It's a benchmark harness + a baseline kernel.)
-
-## What to Emphasize
-
-- ✅ "End-to-end benchmark methodology with reproducible results."
-- ✅ "Honest comparison against the production baseline (cuDNN FA-2)."
-- ✅ "I can articulate every component of the performance gap."
-- ✅ "Modular backend abstraction supports plugging in new kernel versions."
-- ✅ "The roadmap (bf16 → GQA → Paged KV) maps to actual industry priorities."
