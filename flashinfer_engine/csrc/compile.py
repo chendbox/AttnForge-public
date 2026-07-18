@@ -8,6 +8,10 @@ Or compile individual kernels:
 
     python -m csrc.compile --prefill-only
     python -m csrc.compile --decode-only
+    python -m csrc.compile --v2-only
+
+Set FLASHINFER_CUDA_ARCHS to override the v1 build targets, for example:
+    FLASHINFER_CUDA_ARCHS=80,90 python -m csrc.compile --v1-only
 """
 from __future__ import annotations
 
@@ -36,12 +40,14 @@ def main() -> None:
     parser.add_argument("--decode-only",  action="store_true")
     parser.add_argument("--v0-only",      action="store_true")
     parser.add_argument("--v1-only",      action="store_true")
+    parser.add_argument("--v2-only",      action="store_true")
     args = parser.parse_args()
 
     build_prefill = not args.decode_only
     build_decode  = not args.prefill_only
-    build_v0      = not args.v1_only
-    build_v1      = not args.v0_only
+    build_v0      = not args.v1_only and not args.v2_only
+    build_v1      = not args.v0_only and not args.v2_only
+    build_v2      = not args.v0_only and not args.v1_only
 
     if build_prefill and build_v0:
         _build(_CSRC / "flash_v0_prefill")
@@ -49,6 +55,8 @@ def main() -> None:
         _build(_CSRC / "flash_v0_decode")
     if build_prefill and build_v1:
         _build(_CSRC / "flash_v1_prefill")
+    if build_decode and build_v2:
+        _build(_CSRC / "flash_v2_decode")
 
 
 if __name__ == "__main__":

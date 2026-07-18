@@ -8,8 +8,10 @@
 using namespace nvcuda;
 using namespace torch::indexing;
 
+torch::Tensor debug_pv_wmma(torch::Tensor p, torch::Tensor v);
+
 // ------------------------------------------------------------------ //
-// Warp reductions (same as v0 — fp32 softmax stays fp32)
+// Warp reductions (same as v0 - fp32 softmax stays fp32)
 // ------------------------------------------------------------------ //
 
 __inline__ __device__ float warp_reduce_max(float val) {
@@ -27,21 +29,21 @@ __inline__ __device__ float warp_reduce_sum(float val) {
 }
 
 // ------------------------------------------------------------------ //
-// FlashAttention v1 kernel — bf16 input + Tensor Cores (wmma)
+// FlashAttention v1 kernel - bf16 input + Tensor Cores (wmma)
 //
 // Template parameters:
-//   B_r      : rows per Q tile   (must be 16 — wmma M dimension)
-//   B_c      : cols per KV tile  (must be 16 — wmma N dimension)
+//   B_r      : rows per Q tile   (must be 16 - wmma M dimension)
+//   B_c      : cols per KV tile  (must be 16 - wmma N dimension)
 //   HEAD_DIM : attention head dimension (64 or 128)
 //
 // wmma tile shape used: M=16, N=16, K=16
-//   QK^T: A=Q(16×HEAD_DIM), B=K^T(HEAD_DIM×16) → C=scores(16×16)
+//   QK^T: A=Q(16xHEAD_DIM), B=K^T(HEAD_DIMx16) -> C=scores(16x16)
 //         loop over K in steps of 16: HEAD_DIM/16 iterations
-//   PV:   A=P(16×16),       B=V(16×HEAD_DIM)   → C=O(16×HEAD_DIM)
+//   PV:   A=P(16x16),       B=V(16xHEAD_DIM)   -> C=O(16xHEAD_DIM)
 //         loop over N in steps of 16: HEAD_DIM/16 output tiles
 //
 // Each thread block handles one (batch-head, row-tile) pair.
-// One warp (32 threads) per wmma operation.
+// One warp computes the score tile; multiple warps update output tiles.
 // ------------------------------------------------------------------ //
 
 template <int B_r, int B_c, int HEAD_DIM>
@@ -58,7 +60,8 @@ __global__ void flashattention_v1_kernel(
     __shared__ __nv_bfloat16 q_tile[B_r][HEAD_DIM + 8];  // +8: avoid bank conflicts
     __shared__ __nv_bfloat16 k_tile[B_c][HEAD_DIM + 8];
     __shared__ __nv_bfloat16 v_tile[B_c][HEAD_DIM + 8];
-    __shared__ float          o_tile[B_r][HEAD_DIM + 1];
+    __shared__ __nv_bfloat16 p_bf16[B_r][B_c + 8];
+    __shared__ float         o_tile[B_r][HEAD_DIM + 1];
 
     // softmax running stats (fp32 for precision)
     __shared__ float m_tile[B_r];      // row max
@@ -68,11 +71,12 @@ __global__ void flashattention_v1_kernel(
     // scores and softmax probabilities (fp32)
     __shared__ float scores[B_r][B_c];
     __shared__ float p[B_r][B_c];
+    __shared__ float o_partial[HEAD_DIM / 16][B_r][16];
 
     // ---- thread/block indexing ----
-    int tid           = threadIdx.x;
-    int warp_id       = tid / 32;
-    int lane_id       = tid % 32;
+    int tid             = threadIdx.x;
+    int warp_id         = tid / 32;
+    int lane_id         = tid % 32;
     int warps_per_block = blockDim.x / 32;
 
     int bh        = blockIdx.y;
@@ -80,7 +84,7 @@ __global__ void flashattention_v1_kernel(
     int row_start = row_block * B_r;
     int row_end   = min(row_start + B_r, seq_len);
 
-    int base  = bh * seq_len * head_dim;
+    int base    = bh * seq_len * head_dim;
     float scale = rsqrtf((float)HEAD_DIM);
 
     // ---- load Q tile (bf16) and initialize O tile (fp32) ----
@@ -125,29 +129,43 @@ __global__ void flashattention_v1_kernel(
         }
         __syncthreads();
 
-        // ============================================================
-        // TODO 1: Compute scores = Q_tile @ K_tile^T using wmma
-        //
-        // Target: scores[B_r][B_c]  (fp32, already in shared memory)
-        //
-        // Approach:
-        //   - Each warp computes one 16×16 output tile of scores
-        //   - wmma fragment shapes: matrix_a(16,16,16,bf16,row_major)
-        //                           matrix_b(16,16,16,bf16,col_major)
-        //                           accumulator(16,16,16,float)
-        //   - Loop over K in steps of 16 (HEAD_DIM/16 iterations)
-        //   - Accumulate into fp32 accumulator fragment
-        //   - Apply scale factor after wmma
-        //   - Apply causal mask (set masked positions to -INFINITY)
-        //   - Store result into scores[r][c] shared memory
-        //
-        // Hint: use wmma::fill_fragment, load_matrix_sync,
-        //       mma_sync, store_matrix_sync
-        // ============================================================
+        // ---- compute scores = Q_tile @ K_tile^T with WMMA ----
+        if (warp_id == 0) {
+            wmma::fragment<wmma::matrix_a, B_r, B_c, 16, __nv_bfloat16, wmma::row_major> q_frag;
+            wmma::fragment<wmma::matrix_b, B_r, B_c, 16, __nv_bfloat16, wmma::col_major> k_frag;
+            wmma::fragment<wmma::accumulator, B_r, B_c, 16, float> score_frag;
+
+            wmma::fill_fragment(score_frag, 0.0f);
+
+            #pragma unroll
+            for (int k0 = 0; k0 < HEAD_DIM; k0 += 16) {
+                wmma::load_matrix_sync(q_frag, &q_tile[0][k0], HEAD_DIM + 8);
+                wmma::load_matrix_sync(k_frag, &k_tile[0][k0], HEAD_DIM + 8);
+                wmma::mma_sync(score_frag, q_frag, k_frag, score_frag);
+            }
+
+            wmma::store_matrix_sync(&scores[0][0], score_frag, B_c, wmma::mem_row_major);
+        }
 
         __syncthreads();
 
-        // ---- online softmax update (same as v0 — fp32, no changes needed) ----
+        for (int idx = tid; idx < B_r * B_c; idx += blockDim.x) {
+            int r = idx / B_c;
+            int c = idx % B_c;
+            int global_r = row_start + r;
+            int global_c = col_start + c;
+
+            bool valid = (global_r < seq_len) &&
+                         (c < Bc_actual) &&
+                         (global_c < seq_len) &&
+                         (!causal || global_c <= global_r);
+
+            scores[r][c] = valid ? scores[r][c] * scale : -INFINITY;
+        }
+
+        __syncthreads();
+
+        // ---- online softmax update (same as v0 - fp32) ----
         for (int r = warp_id; r < B_r; r += warps_per_block) {
             int global_r = row_start + r;
 
@@ -161,7 +179,7 @@ __global__ void flashattention_v1_kernel(
 
             float m_old = m_tile[r];
             float m_new = fmaxf(m_old, row_max);
-            float alpha  = (m_old != -INFINITY) ? expf(m_old - m_new) : 0.0f;
+            float alpha = (m_old != -INFINITY) ? expf(m_old - m_new) : 0.0f;
 
             float local_sum = 0.0f;
             if (global_r < seq_len) {
@@ -183,23 +201,45 @@ __global__ void flashattention_v1_kernel(
 
         __syncthreads();
 
-        // ============================================================
-        // TODO 2: Update output accumulator O_tile += P_tile @ V_tile
-        //         using wmma
-        //
-        // Target: o_tile[B_r][HEAD_DIM]  (fp32)
-        //
-        // Approach:
-        //   - P_tile is bf16-converted from p[B_r][B_c] (fp32 → bf16)
-        //   - V_tile is already bf16 in v_tile[B_c][HEAD_DIM]
-        //   - Each warp computes a 16×16 output tile of O
-        //   - Loop over HEAD_DIM in steps of 16 (HEAD_DIM/16 iterations)
-        //   - Before accumulating: rescale existing o_tile by alpha_tile[r]
-        //   - Store updated o_tile back to shared memory
-        //
-        // Hint: convert p[][] to bf16 before feeding into wmma;
-        //       accumulator fragment is fp32; multiply by alpha after load
-        // ============================================================
+        // ---- rescale running output and convert P tile to bf16 ----
+        for (int idx = tid; idx < B_r * HEAD_DIM; idx += blockDim.x) {
+            int r = idx / HEAD_DIM;
+            int d = idx % HEAD_DIM;
+            o_tile[r][d] *= alpha_tile[r];
+        }
+
+        for (int idx = tid; idx < B_r * B_c; idx += blockDim.x) {
+            int r = idx / B_c;
+            int c = idx % B_c;
+            p_bf16[r][c] = __float2bfloat16(p[r][c]);
+        }
+
+        __syncthreads();
+
+        // P @ V uses Tensor Cores. Store each WMMA result into a compact
+        // 16x16 tile first; WMMA store/load is fragile with padded fp32 strides.
+        constexpr int OUTPUT_TILES = HEAD_DIM / 16;
+        if (warp_id < OUTPUT_TILES) {
+            int out_col = warp_id * 16;
+
+            wmma::fragment<wmma::matrix_a, B_r, 16, B_c, __nv_bfloat16, wmma::row_major> p_frag;
+            wmma::fragment<wmma::matrix_b, B_r, 16, B_c, __nv_bfloat16, wmma::row_major> v_frag;
+            wmma::fragment<wmma::accumulator, B_r, 16, B_c, float> pv_frag;
+
+            wmma::fill_fragment(pv_frag, 0.0f);
+            wmma::load_matrix_sync(p_frag, &p_bf16[0][0], B_c + 8);
+            wmma::load_matrix_sync(v_frag, &v_tile[0][out_col], HEAD_DIM + 8);
+            wmma::mma_sync(pv_frag, p_frag, v_frag, pv_frag);
+            wmma::store_matrix_sync(&o_partial[warp_id][0][0], pv_frag, 16, wmma::mem_row_major);
+
+            __syncwarp();
+
+            for (int idx = lane_id; idx < B_r * 16; idx += 32) {
+                int r = idx / 16;
+                int d = idx % 16;
+                o_tile[r][out_col + d] += o_partial[warp_id][r][d];
+            }
+        }
 
         __syncthreads();
     }
@@ -228,7 +268,7 @@ torch::Tensor custom_flash_attention_v1(
     int  num_heads,
     bool causal)
 {
-    TORCH_CHECK(q.is_cuda(),  "q must be a CUDA tensor");
+    TORCH_CHECK(q.is_cuda(), "q must be a CUDA tensor");
     TORCH_CHECK(q.scalar_type() == torch::kBFloat16, "v1 kernel requires bf16 input");
 
     int batch      = q.size(0);
@@ -287,5 +327,7 @@ torch::Tensor custom_flash_attention_v1(
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_flash_attention_v1", &custom_flash_attention_v1,
-          "FlashAttention v1 — bf16 input + Tensor Cores (wmma)");
+          "FlashAttention v1 - bf16 input + Tensor Cores (wmma)");
+    m.def("debug_pv_wmma", &debug_pv_wmma,
+          "Debug 16x16 bf16 P @ V WMMA block");
 }

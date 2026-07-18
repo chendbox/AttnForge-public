@@ -19,7 +19,7 @@ The repository already has:
 - benchmark scripts, backend abstraction, and correctness tests
 
 That means the next work is not "start from zero." The next work is to turn
-the current kernel baseline into a small but credible inference project.
+the current educational baseline into a small but credible inference project.
 
 ## Mainline
 
@@ -34,7 +34,7 @@ the current kernel baseline into a small but credible inference project.
 ### Problem
 
 The current `v0` prefill path is much slower than PyTorch SDPA because it is an
-fp32 baseline and does not use the modern Tensor Core path.
+fp32 educational kernel and does not use the modern Tensor Core path.
 
 ### Scope
 
@@ -54,7 +54,7 @@ A benchmarked and testable `v1` prefill backend that clearly explains:
 
 ### Resume value
 
-"Upgraded a custom FlashAttention baseline to a bf16/Tensor Core prefill
+"Upgraded a coursework FlashAttention baseline to a bf16/Tensor Core prefill
 backend and benchmarked it against PyTorch SDPA."
 
 ## Stage 2: `v2`

@@ -12,10 +12,12 @@ flowchart LR
     Pipeline --> Dispatcher["BackendDispatcher"]
     Dispatcher --> P1["SDPAPrefill\n(cuDNN FA-2)"]
     Dispatcher --> P2["FlashV0Prefill\n(FA-1, fp32)"]
-    Dispatcher --> P3["FlashV1Prefill\n(bf16+wmma) planned"]
+    Dispatcher --> P3["FlashV1Prefill\n(bf16+wmma, prefill-only)"]
     Dispatcher --> D1["SDPANaive\n(decode)"]
     Dispatcher --> D2["FlashV0Decode\n(FA-1, fp32)"]
+    Dispatcher --> D3["FlashV2Decode\n(GQA-native, fp32)"]
     D2 <--> KV["KV Cache\n(batch, seq, hidden)"]
+    D3 <--> GQAKV["GQA KV Cache\n(batch, kv_heads, seq, head_dim)"]
     Pipeline --> Results["BenchResult → JSON"]
 ```
 
@@ -26,8 +28,8 @@ flowchart LR
 | Milestone | Description | Status |
 |-----------|-------------|--------|
 | **I0** | Benchmark harness (prefill/decode, JSON results, plots) | Done |
-| **I1** | `v1`: bf16 + Tensor Core prefill path | Planned |
-| **I2** | `v2`: GQA-native KV cache for decode | Planned |
+| **I1** | `v1`: bf16 + Tensor Core prefill path | Done |
+| **I2** | `v2`: GQA-native KV cache for decode | Done |
 | **I3** | lightweight runtime integration for demos / MLIS | Planned |
 
 ## Kernel versions
@@ -36,8 +38,8 @@ flowchart LR
 |---------|-------------|
 | `sdpa` / `sdpa_naive` | PyTorch baseline (cuDNN FlashAttention-2 internally) |
 | `flashattn_v0` | Custom kernel - fp32, MHA, tiled FlashAttention-1 style |
-| `flashattn_v1` *(planned)* | + bf16 + Tensor Cores (wmma) |
-| `flashattn_v2` *(planned)* | + GQA-native KV cache |
+| `flashattn_v1` | bf16 + Tensor Cores (wmma), prefill-only |
+| `flashattn_v2` | GQA-native fp32 single-token decode with static KV cache |
 | `runtime` *(planned)* | lightweight inference integration over the optimized backends |
 
 ## Project Structure
@@ -81,12 +83,31 @@ python benchmarks/benchmark_decode.py \
 
 # Generate plots
 python benchmarks/plot_results.py
+
+# Optional: build and numerically check the v1 prefill kernel
+python -m csrc.compile --v1-only
+pytest tests/test_correctness.py -vv
+
+# Build and check the v2 GQA-native decode kernel
+python -m csrc.compile --v2-only
+pytest tests/test_v2_gqa_decode.py -vv
+python benchmarks/benchmark_decode.py \
+    --model configs/models/llama3_2_1b.yaml \
+    --backends sdpa_naive flashattn_v0 flashattn_v2 \
+    --context-lens 512 1024 2048 4096 \
+    --batch-sizes 1 4 \
+    --check-correctness
 ```
 
 ## Latest Snapshot
 
-See `docs/PERFORMANCE.md` for the current numbers and `docs/figures/`
-for latency / TBT / speedup plots.
+The H100 roadmap plot is in `docs/figures/attention_roadmap_h100.png`.
+V1 validates the bf16 WMMA prefill path, while V2 adds a GQA-native decode
+kernel that reduces H100 PCIe decode p50 latency versus the v0 decode baseline
+across batch 1/4 and context lengths 512-4096.
+
+See `docs/PERFORMANCE.md` for additional notes and `docs/figures/` for
+latency / TBT / speedup plots.
 
 ## Roadmap
 

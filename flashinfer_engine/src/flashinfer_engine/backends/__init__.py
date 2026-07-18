@@ -4,8 +4,8 @@ Backend registry.
 Naming convention:
   - "sdpa"           — PyTorch baseline (cuDNN FlashAttention-2 internally)
   - "flashattn_v0"   — our custom kernel, baseline educational implementation
-  - "flashattn_v1"   — (planned) bf16 + Tensor Cores
-  - "flashattn_v2"   — (planned) GQA-native
+  - "flashattn_v1"   — bf16 + Tensor Cores (prefill-only today)
+  - "flashattn_v2"   — GQA-native decode
   - "flashattn_v3"   — (planned) Paged KV Cache
 
 Each new kernel version registers under both prefill and decode dicts.
@@ -16,6 +16,7 @@ from .sdpa import SDPABackend
 from .flash_v0_prefill import FlashV0PrefillBackend
 from .flash_v0_decode import FlashV0DecodeBackend
 from .flash_v1_prefill import FlashV1PrefillBackend
+from .flash_v2_decode import FlashV2DecodeBackend
 
 # Registry: name -> backend class
 _PREFILL_BACKENDS: dict[str, type] = {
@@ -27,6 +28,7 @@ _PREFILL_BACKENDS: dict[str, type] = {
 _DECODE_BACKENDS: dict[str, type] = {
     "sdpa_naive": SDPABackend,
     "flashattn_v0": FlashV0DecodeBackend,
+    "flashattn_v2": FlashV2DecodeBackend,
 }
 
 
